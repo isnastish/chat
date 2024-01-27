@@ -29,6 +29,6 @@ func main() {
 		server = NewServer()
 		server.Run(&options)
 	} else if linstance == "client" {
-		Run(&options)
+		// Run(&options)
 	}
 }
