@@ -3,7 +3,13 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"fmt"
+	"net"
+	"os"
+	"os/exec"
 	"strings"
+	"time"
 )
 
 func CheckError(err error) {
@@ -19,4 +25,31 @@ func GenClientId(peerName string) string {
 	CheckError(err)
 	hash := h.Sum(nil)
 	return strings.ToUpper(hex.EncodeToString(hash))
+}
+
+func TrimWhitespaces(str string) string {
+	const cutset = " \n\t\r\f\a\b\v"
+	return strings.Trim(str, cutset)
+}
+
+func lsDir(args ...string) ([]byte, error) {
+	cmd := exec.Command("ls.exe", args...)
+	cmdOut, err := cmd.Output()
+	return cmdOut, err
+}
+
+// Server specific.
+func Echo(c net.Conn, shout string, delay time.Duration) {
+	fmt.Fprintln(c, "\t", strings.ToUpper(shout))
+	time.Sleep(delay)
+	fmt.Fprintln(c, "\t", shout)
+	time.Sleep(delay)
+	fmt.Fprintln(c, "\t", strings.ToLower(shout))
+}
+
+func DoesFileExist(filepath string) bool {
+	if _, err := os.Stat(filepath); errors.Is(err, os.ErrNotExist) {
+		return false
+	}
+	return true
 }
