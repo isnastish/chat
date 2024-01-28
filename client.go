@@ -9,7 +9,7 @@ import (
 
 type RemoteConn struct {
 	Conn net.Conn
-	Addr net.Addr
+	Addr string
 }
 
 type Session struct {
@@ -20,7 +20,7 @@ type Session struct {
 func NewSession(remote net.Conn) *Session {
 	return &Session{
 		Done:   make(chan struct{}),
-		Remote: RemoteConn{remote, remote.RemoteAddr()},
+		Remote: RemoteConn{remote, remote.RemoteAddr().String()},
 	}
 }
 
@@ -46,7 +46,7 @@ func Run(options *Options) {
 		}
 	}()
 
-	fmt.Println("Connected to: ", session.Remote.Addr.String())
+	fmt.Println("Connected to: ", session.Remote.Addr)
 
 	go session.recv(os.Stdout, conn)
 	go session.recv(conn, os.Stdin)
