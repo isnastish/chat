@@ -1,52 +1,35 @@
 package main
 
-// NOTE(alx): Sketch.
-// if matchCommand("ls") {
-// 	ls()
-// } else if matchCommand("cd") {
-// 	cd()
-// }
-
 import (
 	"bufio"
 	"fmt"
 	"io"
 	"log"
 	"net"
-	"os"
-	"os/exec"
 	"strings"
 	"sync"
 	"time"
 )
 
-var SupportedCommands = map[string]string{
-	"ls":    "desc",
-	"cd":    "create new directory",
-	"close": "close session",
-	"get":   "send contents of a file",
-	"cat":   "print contents of a file",
-	"touch": "<filename>",
-	"tree":  "display dir structure",
-	"rm":    "remove dir/file(s)",
-}
-
-type Client struct {
+type Peer struct {
 	Id          string
 	Conn        net.Conn
+	Addr        net.Addr
 	IsConnected bool
 }
 
 type Server struct {
-	Connections map[string]*Client
-	Mu          sync.Mutex // doesn't require initialization
+	Connections map[string]*Peer
+	Mu          sync.Mutex
 }
 
 var server *Server
 
-func NewClient(connection net.Conn) *Client {
-	return &Client{
-		Id:          GenClientId(connection.RemoteAddr().String()),
+func NewPeer(connection net.Conn) *Peer {
+	addr := connection.RemoteAddr()
+	return &Peer{
+		Addr:        addr,
+		Id:          GenSHA256(addr.String()),
 		Conn:        connection,
 		IsConnected: true,
 	}
@@ -54,14 +37,16 @@ func NewClient(connection net.Conn) *Client {
 
 func NewServer() *Server {
 	return &Server{
-		Connections: make(map[string]*Client),
+		Connections: make(map[string]*Peer),
 	}
 }
 
-func (s *Server) addConnection(id string, conn net.Conn) {
+func (s *Server) addConnection(conn net.Conn) *Peer {
 	s.Mu.Lock()
 	defer s.Mu.Unlock()
-	s.Connections[id] = NewClient(conn)
+	peer := NewPeer(conn)
+	s.Connections[peer.Id] = peer
+	return peer
 }
 
 func (s *Server) removeConnection(connId string) {
@@ -70,114 +55,93 @@ func (s *Server) removeConnection(connId string) {
 	delete(s.Connections, connId)
 }
 
-func matchCommand(a, b string) bool {
-	return bool(a == b)
-}
-
-func (s *Server) processCommands() {
-
-}
-
 func (s *Server) processConnection(conn net.Conn) {
-	connId := GenClientId(conn.RemoteAddr().String())
-	s.addConnection(connId, conn)
+	peer := s.addConnection(conn)
+	log.Println("Connected peer: ", peer.Addr.String())
+
+	defer func() {
+		if err := conn.Close(); err != nil {
+			log.Println("Failed to close the connection: ", peer.Addr.String())
+		}
+		s.removeConnection(peer.Id)
+		fmt.Println("Peer disconnected: ", peer.Addr.String())
+	}()
 
 	input := bufio.NewScanner(conn)
 	for input.Scan() {
+		// This is cumbersome!
 		data := strings.Split(input.Text(), " ")
 		command := strings.ToLower(TrimWhitespaces(data[0]))
 		args := data[1:]
-		if matchCommand(command, "ls") {
-			cmd := exec.Command("ls.exe", args...)
-			log.Printf("Command received: %v\n", data)
-			cmdOut, err := cmd.Output()
-			CheckError(err)
-			conn.Write(cmdOut)
-		} else if matchCommand(command, "cd") {
-			// TODO(alx): Check whether it's a single directory.
-			newDirName := args[0]
-			err := os.Mkdir(newDirName, 0755)
-			CheckError(err)
-			// Make sure the directory has been created.
-			out, err := lsDir()
-			CheckError(err)
-			fmt.Println(out)
-		} else if matchCommand(command, "close") {
-			conn.Close()
-			s.Mu.Lock()
-			s.Connections[connId].IsConnected = false
-			s.Mu.Unlock()
-			break
-		} else if matchCommand(command, "get") {
-			if len(args) != 1 {
-				log.Fatal("Only one file can be sent over the network.")
-			}
-			fileName := args[0]
-			log.Println("Sending file", fileName)
 
-			if DoesFileExist(fileName) {
-				f, err := os.Open(fileName)
-				CheckError(err)
-				defer f.Close()
-				bytesSent, err := io.Copy(conn, f)
-				CheckError(err)
-				fmt.Printf("Bytes sent: %d\n", bytesSent)
-			} else {
-				fmt.Printf("File [%s] doesn't exist.\n", fileName)
+		switch {
+		case MatchCommand(command, ":ls"):
+			bytes := Ls(args)
+			conn.Write(bytes)
+
+		case MatchCommand(command, ":cd"):
+			bytes := Cd(args[0])
+			conn.Write(bytes)
+
+		case MatchCommand(command, ":cwd"):
+			bytes := Cwd()
+			conn.Write(bytes)
+
+		case MatchCommand(command, ":cat"):
+			bytes := Cat(args[0])
+			conn.Write(bytes)
+
+		case MatchCommand(command, ":mkdir"):
+			bytes := Mkdir(args[0])
+			conn.Write(bytes)
+
+		case MatchCommand(command, ":rmdir"):
+			bytes := Rmdir(args[0])
+			conn.Write(bytes)
+
+		case MatchCommand(command, ":rm"):
+			Rm(args)
+
+		case MatchCommand(command, ":touch"):
+			filename := TrimWhitespaces(args[0])
+			Touch(filename)
+
+		case MatchCommand(command, ":tree"):
+			Tree()
+
+		// custom commands:
+		case MatchCommand(command, ":get"):
+			f := Get(args[0])
+			defer f.Close()
+			if f != nil {
+				io.Copy(conn, f)
 			}
-		} else if matchCommand(command, "touch") { // create new file
-			if len(args) != 1 {
-				log.Fatal("Only one file can be sent over the network.")
-			}
-			newFileName := TrimWhitespaces(args[0]) // TODO(alx): Introduce file path validation.
-			_, err := os.Create(newFileName)
-			CheckError(err)
-		} else if matchCommand(command, "tree") { // display dir structure on the server side.
-			cmd := exec.Command("tree")
-			out, err := cmd.Output()
-			CheckError(err)
-			_, err = conn.Write(out)
-			CheckError(err)
-		} else if matchCommand(command, "rm") {
-			log.Fatal("not implemented yet.")
-		} else {
+
+		case MatchCommand(command, ":close"):
+			peer.IsConnected = false
+			return
+
+		default:
+			// Let it be echo for now,
+			// but here supposed to be more advanced logic.
 			Echo(conn, input.Text(), 2*time.Second)
 		}
 	}
-	fmt.Println("Client disconnected: ", conn.RemoteAddr().String()) // Use sha?
-	defer func() {
-		if s.Connections[connId].IsConnected {
-			conn.Close()
-		}
-	}()
-	s.removeConnection(connId)
-	// for {
-	// 	message := time.Now().Format("3:04PM\n")
-	// 	_, err := io.WriteString(conn, message)
-	// 	if err != nil {
-	// 		fmt.Println("Client disconnected: ", conn.RemoteAddr().String()) // Use sha?
-	// 		defer conn.Close()
-	// 		s.removeConnection(connId)
-	// 		return
-	// 	}
-	// 	time.Sleep(1000 * time.Microsecond)
-	// }
 }
 
 func (s *Server) Run(options *Options) {
 	var port string
-	if len(options.Ports) != 0 { // design a system to select ports.
+	if len(options.Ports) != 0 {
 		port = options.Ports[0]
 	} else {
 		fmt.Println("Port is not specified, using the default one: 8080")
 		port = "8080"
 	}
 
-	address := options.Address + ":" + port
+	address := options.GetAddress(port)
 	listener, err := net.Listen(options.Network, address)
 	CheckError(err)
 
-	// TODO(alx): Use zap logger.
 	log.Println("Listening: ", address)
 
 	for {
@@ -186,8 +150,6 @@ func (s *Server) Run(options *Options) {
 			fmt.Println("Connection aborted.")
 			continue
 		}
-
-		fmt.Println("Connected client: ", conn.RemoteAddr().String())
 		go s.processConnection(conn)
 	}
 }

@@ -19,7 +19,7 @@ func CheckError(err error) {
 }
 
 // sha256 hashes are frequently used to compute short identities for binary or text blobs, TLS/SSL certificates.
-func GenClientId(peerName string) string {
+func GenSHA256(peerName string) string {
 	h := sha256.New()
 	_, err := h.Write([]byte(peerName))
 	CheckError(err)
@@ -47,9 +47,18 @@ func Echo(c net.Conn, shout string, delay time.Duration) {
 	fmt.Fprintln(c, "\t", strings.ToLower(shout))
 }
 
-func DoesFileExist(filepath string) bool {
+func FileExists(filepath string) bool {
 	if _, err := os.Stat(filepath); errors.Is(err, os.ErrNotExist) {
 		return false
 	}
 	return true
+}
+
+func OneOfMany(str string, many ...string) bool {
+	for _, m := range many {
+		if str == m {
+			return true
+		}
+	}
+	return false
 }
