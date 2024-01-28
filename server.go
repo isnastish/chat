@@ -3,12 +3,10 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"strings"
 	"sync"
-	"time"
 )
 
 type Peer struct {
@@ -55,7 +53,7 @@ func (s *Server) removeConnection(connId string) {
 	delete(s.Connections, connId)
 }
 
-func (s *Server) processConnection(conn net.Conn) {
+func (s *Server) processConnection(conn net.Conn, cmdReg *CmdRegistry) {
 	peer := s.addConnection(conn)
 	log.Println("Connected peer: ", peer.Addr.String())
 
@@ -74,62 +72,68 @@ func (s *Server) processConnection(conn net.Conn) {
 		command := strings.ToLower(TrimWhitespaces(data[0]))
 		args := data[1:]
 
-		switch {
-		case MatchCommand(command, ":ls"):
-			bytes := Ls(args)
-			conn.Write(bytes)
+		cmdRes := cmdReg.ExecuteCommand(command, args)
+		conn.Write(cmdRes)
 
-		case MatchCommand(command, ":cd"):
-			bytes := Cd(args[0])
-			conn.Write(bytes)
+		// switch {
+		// case MatchCommand(command, ":ls"):
+		// 	bytes := Ls(args)
+		// 	conn.Write(bytes)
 
-		case MatchCommand(command, ":cwd"):
-			bytes := Cwd()
-			conn.Write(bytes)
+		// case MatchCommand(command, ":cd"):
+		// 	bytes := Cd(args[0])
+		// 	conn.Write(bytes)
 
-		case MatchCommand(command, ":cat"):
-			bytes := Cat(args[0])
-			conn.Write(bytes)
+		// case MatchCommand(command, ":cwd"):
+		// 	bytes := Cwd()
+		// 	conn.Write(bytes)
 
-		case MatchCommand(command, ":mkdir"):
-			bytes := Mkdir(args[0])
-			conn.Write(bytes)
+		// case MatchCommand(command, ":cat"):
+		// 	bytes := Cat(args[0])
+		// 	conn.Write(bytes)
 
-		case MatchCommand(command, ":rmdir"):
-			bytes := Rmdir(args[0])
-			conn.Write(bytes)
+		// case MatchCommand(command, ":mkdir"):
+		// 	bytes := Mkdir(args[0])
+		// 	conn.Write(bytes)
 
-		case MatchCommand(command, ":rm"):
-			Rm(args)
+		// case MatchCommand(command, ":rmdir"):
+		// 	bytes := Rmdir(args[0])
+		// 	conn.Write(bytes)
 
-		case MatchCommand(command, ":touch"):
-			filename := TrimWhitespaces(args[0])
-			Touch(filename)
+		// case MatchCommand(command, ":rm"):
+		// 	Rm(args)
 
-		case MatchCommand(command, ":tree"):
-			Tree()
+		// case MatchCommand(command, ":touch"):
+		// 	filename := TrimWhitespaces(args[0])
+		// 	Touch(filename)
 
-		// custom commands:
-		case MatchCommand(command, ":get"):
-			f := Get(args[0])
-			defer f.Close()
-			if f != nil {
-				io.Copy(conn, f)
-			}
+		// case MatchCommand(command, ":tree"):
+		// 	Tree()
 
-		case MatchCommand(command, ":close"):
-			peer.IsConnected = false
-			return
+		// // custom commands:
+		// case MatchCommand(command, ":get"):
+		// 	f := Get(args[0])
+		// 	defer f.Close()
+		// 	if f != nil {
+		// 		io.Copy(conn, f)
+		// 	}
 
-		default:
-			// Let it be echo for now,
-			// but here supposed to be more advanced logic.
-			Echo(conn, input.Text(), 2*time.Second)
-		}
+		// case MatchCommand(command, ":close"):
+		// 	peer.IsConnected = false
+		// 	return
+
+		// default:
+		// 	// Let it be echo for now,
+		// 	// but here supposed to be more advanced logic.
+		// 	Echo(conn, input.Text(), 2*time.Second)
+		// }
 	}
 }
 
 func (s *Server) Run(options *Options) {
+	cmdReg := NewCmdRegistry()
+	cmdReg.RegisterCommand(":ls", Ls)
+
 	var port string
 	if len(options.Ports) != 0 {
 		port = options.Ports[0]
@@ -150,6 +154,6 @@ func (s *Server) Run(options *Options) {
 			fmt.Println("Connection aborted.")
 			continue
 		}
-		go s.processConnection(conn)
+		go s.processConnection(conn, cmdReg)
 	}
 }
