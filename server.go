@@ -67,66 +67,22 @@ func (s *Server) processConnection(conn net.Conn, cmdReg *CmdRegistry) {
 
 	input := bufio.NewScanner(conn)
 	for input.Scan() {
-		// This is cumbersome!
 		data := strings.Split(input.Text(), " ")
 		command := strings.ToLower(TrimWhitespaces(data[0]))
 		args := data[1:]
 
-		cmdRes := cmdReg.ExecuteCommand(command, args)
+		var cmdRes []byte
+		if command == ":commands" {
+			var tmpRes string
+			for cmd := range cmdReg.commands {
+				tmpRes += cmd + " "
+			}
+			cmdRes = []byte("Current available commands:\n" + tmpRes + "\n\n")
+		} else {
+			cmdRes = cmdReg.ExecuteCommand(command, args)
+		}
+
 		conn.Write(cmdRes)
-
-		// switch {
-		// case MatchCommand(command, ":ls"):
-		// 	bytes := Ls(args)
-		// 	conn.Write(bytes)
-
-		// case MatchCommand(command, ":cd"):
-		// 	bytes := Cd(args[0])
-		// 	conn.Write(bytes)
-
-		// case MatchCommand(command, ":cwd"):
-		// 	bytes := Cwd()
-		// 	conn.Write(bytes)
-
-		// case MatchCommand(command, ":cat"):
-		// 	bytes := Cat(args[0])
-		// 	conn.Write(bytes)
-
-		// case MatchCommand(command, ":mkdir"):
-		// 	bytes := Mkdir(args[0])
-		// 	conn.Write(bytes)
-
-		// case MatchCommand(command, ":rmdir"):
-		// 	bytes := Rmdir(args[0])
-		// 	conn.Write(bytes)
-
-		// case MatchCommand(command, ":rm"):
-		// 	Rm(args)
-
-		// case MatchCommand(command, ":touch"):
-		// 	filename := TrimWhitespaces(args[0])
-		// 	Touch(filename)
-
-		// case MatchCommand(command, ":tree"):
-		// 	Tree()
-
-		// // custom commands:
-		// case MatchCommand(command, ":get"):
-		// 	f := Get(args[0])
-		// 	defer f.Close()
-		// 	if f != nil {
-		// 		io.Copy(conn, f)
-		// 	}
-
-		// case MatchCommand(command, ":close"):
-		// 	peer.IsConnected = false
-		// 	return
-
-		// default:
-		// 	// Let it be echo for now,
-		// 	// but here supposed to be more advanced logic.
-		// 	Echo(conn, input.Text(), 2*time.Second)
-		// }
 	}
 }
 
