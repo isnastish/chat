@@ -2,7 +2,7 @@
 
 TARGET_DIR = build
 TARGET_APP = server
-SRC = main.go server.go helpers.go registry.go
+SRC = main.go server.go helpers.go registry.go commands.go
 
 .PHONY: all clean
 

@@ -7,18 +7,25 @@ import (
 	"os"
 )
 
-type Session struct {
-	Done chan struct{}
+type RemoteConn struct {
+	Conn net.Conn
+	Addr net.Addr
 }
 
-func NewSession() *Session {
+type Session struct {
+	Done   chan struct{}
+	Remote RemoteConn
+}
+
+func NewSession(remote net.Conn) *Session {
 	return &Session{
-		Done: make(chan struct{}),
+		Done:   make(chan struct{}),
+		Remote: RemoteConn{remote, remote.RemoteAddr()},
 	}
 }
 
 func (s *Session) recv(dst io.Writer, src io.Reader) {
-	_, err := io.Copy(dst, src) // conn net.Conn
+	_, err := io.Copy(dst, src)
 
 	if err != nil {
 		fmt.Println("Ignore the error for now.")
@@ -31,7 +38,7 @@ func Run(options *Options) {
 	conn, err := net.Dial(options.Network, options.GetAddress(options.Ports[0]))
 	CheckError(err)
 
-	session := NewSession()
+	session := NewSession(conn)
 
 	defer func() {
 		if err := conn.Close(); err != nil {
@@ -39,12 +46,10 @@ func Run(options *Options) {
 		}
 	}()
 
-	fmt.Println("Connected to: ", conn.RemoteAddr().String())
+	fmt.Println("Connected to: ", session.Remote.Addr.String())
 
 	go session.recv(os.Stdout, conn)
-
-	// receive messages from the server on a separate routine. (what's the difference)
-	go session.recv(conn, os.Stdin) // try std::err
+	go session.recv(conn, os.Stdin)
 
 	<-session.Done
 }
