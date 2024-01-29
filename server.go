@@ -78,6 +78,8 @@ func (s *Server) processConnection(conn net.Conn, cmdReg *CmdRegistry) {
 				tmpRes += cmd + " "
 			}
 			cmdRes = []byte("Current available commands:\n" + tmpRes + "\n\n")
+		} else if command == ":clients" {
+			cmdRes = []byte(fmt.Sprintf("%d online\n\n", len(s.Connections)))
 		} else {
 			cmdRes = cmdReg.ExecuteCommand(command, args)
 		}
