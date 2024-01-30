@@ -3,10 +3,13 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"log"
 	"net"
+	"os"
 	"strings"
 	"sync"
+	"time"
 )
 
 type Peer struct {
@@ -16,12 +19,38 @@ type Peer struct {
 	IsConnected bool
 }
 
+// This is your command registry.
+// And then commands.go will be renamed to cli.go and be part of a server package,
+// since it's server specific.
+// But we can go the other way around and do commands validation on the client side,
+// and ONLY send correct commands with their arguments over the network.
+// It will help to handle cases like (mkdir <dirname> & cd <dirname> etc.)
+
+type CommandHandler func(args ...string) []byte
+type Cli struct {
+	commandRegistry map[string]CommandHandler
+}
+
 type Server struct {
 	Connections map[string]*Peer
+	cli         *Cli // maybe not a pointer, didn't have enough time to think about it.
 	Mu          sync.Mutex
 }
 
 var server *Server
+
+func (cli *Cli) registerCommand(command string, handler CommandHandler) {
+	cli.commandRegistry[command] = handler
+}
+
+func (cli *Cli) getHandler(command string) (CommandHandler, bool) {
+	// I would make it as simple as possible, so it just returns a handle.
+	h, exists := cli.commandRegistry[command]
+	if exists {
+		return h, true
+	}
+	return nil, false
+}
 
 func NewPeer(connection net.Conn) *Peer {
 	addr := connection.RemoteAddr()
@@ -34,12 +63,29 @@ func NewPeer(connection net.Conn) *Peer {
 }
 
 func NewServer() *Server {
-	return &Server{
+	s := Server{
 		Connections: make(map[string]*Peer),
+		cli: &Cli{
+			commandRegistry: make(map[string]CommandHandler),
+		},
 	}
+
+	// Register all the commans that can be executed on a server.
+	// We can add custom commands as well, but a handler would be different.
+	s.cli.registerCommand(":ls", ls)
+	s.cli.registerCommand(":cd", cd)
+	s.cli.registerCommand(":cwd", cwd)
+	s.cli.registerCommand(":cat", cat)
+	s.cli.registerCommand(":mkdir", mkdir)
+	s.cli.registerCommand(":rmdir", rmdir)
+	s.cli.registerCommand(":rm", rm)
+	s.cli.registerCommand(":touch", touch)
+
+	return &s
 }
 
 func (s *Server) addConnection(conn net.Conn) *Peer {
+	log.Println("Added new connection")
 	s.Mu.Lock()
 	defer s.Mu.Unlock()
 	peer := NewPeer(conn)
@@ -53,16 +99,16 @@ func (s *Server) removeConnection(connId string) {
 	delete(s.Connections, connId)
 }
 
-func (s *Server) processConnection(conn net.Conn, cmdReg *CmdRegistry) {
-	peer := s.addConnection(conn)
-	log.Println("Connected peer: ", peer.Addr.String())
+func (s *Server) processConnection(conn net.Conn) {
+	curPeer := s.addConnection(conn) // pointer might change its address as we add more connections.
+	log.Println("Connected peer: ", curPeer.Addr.String())
 
 	defer func() {
 		if err := conn.Close(); err != nil {
-			log.Println("Failed to close the connection: ", peer.Addr.String())
+			log.Println("Failed to close the connection: ", curPeer.Addr.String())
 		}
-		s.removeConnection(peer.Id)
-		fmt.Println("Peer disconnected: ", peer.Addr.String())
+		s.removeConnection(curPeer.Id)
+		fmt.Println("Peer disconnected: ", curPeer.Addr.String())
 	}()
 
 	input := bufio.NewScanner(conn)
@@ -71,20 +117,54 @@ func (s *Server) processConnection(conn net.Conn, cmdReg *CmdRegistry) {
 		command := strings.ToLower(TrimWhitespaces(data[0]))
 		args := data[1:]
 
-		var cmdRes []byte
-		if command == ":help" {
-			var tmpRes string
-			for cmd := range cmdReg.commands {
-				tmpRes += cmd + " "
-			}
-			cmdRes = []byte("Current available commands:\n" + tmpRes + "\n\n")
-		} else if command == ":clients" {
-			cmdRes = []byte(fmt.Sprintf("%d online\n\n", len(s.Connections)))
+		// NOTE: This is not a final version, because if we want to handle edge cases like this:
+		// mkdir <dirname> & cd <dirname> we would have to parse the whole string and break it down into tokens.
+		if handler, exist := s.cli.getHandler(command); exist {
+			log.Println("Invoking :ls command")
+			conn.Write(handler(args...))
 		} else {
-			cmdRes = cmdReg.ExecuteCommand(command, args)
-		}
+			switch {
 
-		conn.Write(cmdRes)
+			case MatchCommand(command, ":ftp"):
+				// get file name from the host, returns only bytes for now.
+				if len(args) == 0 {
+					conn.Write([]byte("File is not specified\n"))
+					continue
+				}
+
+				f, err := os.Open(args[0])
+				if err != nil {
+					conn.Write([]byte("File doesn't exist\n"))
+				} else {
+					defer f.Close()
+					io.Copy(conn, f)
+				}
+
+			case MatchCommand(command, ":close"):
+				// close the connection
+				curPeer.IsConnected = false
+				return
+
+			case MatchCommand(command, ":echo"):
+				// Invoke echo server
+				Echo(conn, strings.Join(args, " "), 2*time.Second)
+
+			case MatchCommand(command, ":send"):
+				// NOTE(alx): If we want to send file from one client to another,
+				// It should come through the server, since we don't support client-to-client communication.
+				// Support P2P? The problem with that would be is that client knows nothing about other clients.
+				// But on the other hand, it will speed up the process of transferring the files and messages.
+				panic("Sending files to different clients is not implemented yet.")
+
+			default:
+				// Send messages to all clients.
+				for _, peer := range s.Connections {
+					if curPeer.Id != peer.Id {
+						peer.Conn.Write([]byte(input.Text()))
+					}
+				}
+			}
+		}
 	}
 }
 
