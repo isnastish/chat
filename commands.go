@@ -12,78 +12,93 @@ func MatchCommand(command, match string) bool {
 	return bool(command == match)
 }
 
-func Ls(args []string) []byte {
+func ls(args ...string) []byte {
 	cmd := exec.Command("ls", args...)
 	cmdOut, err := cmd.Output()
 	if err != nil {
-		log.Println(":ls command failed with error: ", err.Error())
-		return []byte{}
+		return []byte("ls command failed\n")
 	}
 	return cmdOut
 }
 
-func Cd(dirname string) []byte {
-	err := os.Chdir(dirname)
-	if err != nil {
-		log.Println(":cd command failed with error: ", err.Error())
-		return []byte{}
+func cd(args ...string) []byte {
+	if len(args) != 0 {
+		err := os.Chdir(args[0])
+		if err != nil {
+			log.Println(":cd command failed with error: ", err.Error())
+			return []byte{}
+		}
+		dir, _ := os.Getwd()
+		return []byte(dir)
 	}
-
-	// Display current working directory back to client.
-	dir, _ := os.Getwd()
-	return []byte(dir)
+	return []byte{}
 }
 
-func Cwd() []byte {
+func cwd(args ...string) []byte {
 	dir, err := os.Getwd()
 	if err != nil {
 		fmt.Println(":cwd command failed with error: ", err.Error())
-		return nil
+		return []byte{}
 	}
 	return []byte(dir)
 }
 
-func Mkdir(dirname string) []byte {
-	err := os.Mkdir(dirname, 0755)
-	if err != nil {
-		log.Println(":mkdir command failed with error: ", err.Error())
+func mkdir(args ...string) []byte {
+	if len(args) != 0 {
+		err := os.Mkdir(args[0], 0755)
+		if err != nil {
+			log.Println(":mkdir command failed with error: ", err.Error())
+			return []byte("Internal server error\n")
+		}
+		return cwd()
 	}
-	return Cwd()
+	return []byte("Directory is not specified\n")
 }
 
-func Rmdir(dirname string) []byte {
-	err := os.RemoveAll(dirname)
-	if err != nil {
-		log.Panic(":rmdir command failed with error: ", err.Error())
+func rmdir(args ...string) []byte {
+	if len(args) != 0 {
+		err := os.RemoveAll(args[0])
+		if err != nil {
+			log.Panic(":rmdir command failed with error: ", err.Error())
+			return []byte("Internal server error\n")
+		}
+		return cwd()
 	}
-	return Cwd()
+	return []byte("Directory is not specified\n")
 }
 
-func Tree() []byte {
+func tree(args ...string) []byte {
 	panic(errors.New("Tree command is not implemented yet."))
 }
 
-func Touch(filename string) {
-	f, err := os.Create(filename)
-	if err != nil {
-		log.Println(":touch command failed with error: ", err.Error())
-		return
+func touch(args ...string) []byte {
+	if len(args) != 0 {
+		f, err := os.Create(args[0])
+		if err != nil {
+			log.Println(":touch command failed with error: ", err.Error())
+			// Return internal server error?
+			return []byte{}
+		}
+		defer f.Close()
 	}
-	defer f.Close()
+	return []byte("file is not specified\n")
 }
 
-func Cat(filepath string) []byte {
-	contents, err := os.ReadFile(filepath)
-	if err != nil {
-		log.Println(":cat command failed with error: ", err.Error())
-		return []byte{}
+func cat(args ...string) []byte {
+	if len(args) != 0 {
+		contents, err := os.ReadFile(args[0])
+		if err != nil {
+			log.Println(":cat command failed with error: ", err.Error())
+			return []byte{}
+		}
+		contents = append(contents, '\n')
+		return contents
 	}
-	contents = append(contents, '\n')
-	return contents
+	return []byte("file doesn't exist\n")
 }
 
 // Very small subset of what rm command actually can support.
-func Rm(args []string) {
+func rm(args ...string) []byte {
 	var handleError = func(err error) {
 		if err != nil {
 			log.Println(":rm command failed with error: ", err.Error())
@@ -116,19 +131,6 @@ func Rm(args []string) {
 		} else {
 			log.Println(":rm Invalid command arguments: ", args)
 		}
-		return
 	}
-}
-
-// Read the file on the server side into a byte array and send to the client.
-func Get(filepath string) *os.File {
-	file, err := os.Open(filepath)
-	if err != nil {
-		log.Println(err)
-		return nil
-	}
-
-	// NOTE(alx): What if we return already closed file descriptor?
-	// defer file.Close()
-	return file
+	return []byte{}
 }
