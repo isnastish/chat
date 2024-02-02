@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	_ "crypto/tls"
 	"fmt"
 	"io"
 	"log"
@@ -83,7 +84,9 @@ func NewServer() *Server {
 	s.cli.registerCommand(":rmdir", rmdir)
 	s.cli.registerCommand(":rm", rm)
 	s.cli.registerCommand(":touch", touch)
-	s.cli.registerCommand(":du", du) // disk usage
+	s.cli.registerCommand(":du", diskUsage)
+	s.cli.registerCommand(":pwd", pwd)
+	s.cli.registerCommand(":mv", mv)
 
 	return &s
 }
@@ -203,7 +206,20 @@ func (s *Server) processConnection(conn net.Conn) {
 
 func (s *Server) Run(options *Options) {
 	address := options.GetAddress()
+
+	// cert, err := tls.LoadX509KeyPair("generated-cert.pem", "generated-key.pem")
+	// if err != nil {
+	// 	log.Fatal(err)
+	// }
+
+	// // should be part of a server.
+	// config := &tls.Config{
+	// 	Certificates: []tls.Certificate{cert},
+	// }
+
+	// listener, err := tls.Listen(options.Network, address, config)
 	listener, err := net.Listen(options.Network, address)
+
 	if err != nil {
 		log.Fatal(err)
 	}

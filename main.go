@@ -10,6 +10,9 @@ import (
 func main() {
 	options := Options{}
 
+	// NOTE(alx): Uncomment to generate a new certificate.
+	// genCertificateSimple()
+
 	flag.IntVar(&options.Port, "port", 8080, "Ports to connect to")
 	flag.StringVar(&options.Network, "network", "tcp", "Network protocol [tcp|udp]")
 	flag.StringVar(&options.Address, "address", "localhost", "Address of the server to connect to.")
