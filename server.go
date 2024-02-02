@@ -72,7 +72,7 @@ func (s *Server) processConnection(conn net.Conn, cmdReg *CmdRegistry) {
 		args := data[1:]
 
 		var cmdRes []byte
-		if command == ":commands" {
+		if command == ":help" {
 			var tmpRes string
 			for cmd := range cmdReg.commands {
 				tmpRes += cmd + " "
