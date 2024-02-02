@@ -1,15 +1,92 @@
 package main
 
+// TODO(alx): All the commands should work on both linux/windows operating systems.
+// Support only Linux for simplicity?
+
 import (
 	"errors"
 	"fmt"
+	"io/fs"
+	_ "io/fs"
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
+
+	_ "github.com/niemeyer/golang/src/pkg/container/vector"
 )
+
+// dirsChan := make(chan DirUsage)
+// We can just use fs.FileInfo to store the information about files.
+type DirUsage struct {
+	name         string
+	totalFiles   uint32
+	filesSize    int64
+	subdirsCount uint32
+}
 
 func MatchCommand(command, match string) bool {
 	return bool(command == match)
+}
+
+func getAllDirs(rootPath string) []fs.DirEntry {
+	entries, err := os.ReadDir(rootPath)
+	if err != nil {
+		log.Fatal("failed to read directory with the following error: ", err.Error())
+	}
+
+	result := []fs.DirEntry{}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			result = append(result, entry)
+		}
+	}
+
+	return result
+}
+
+func traverseDir(rootPath string, filesizes chan<- int64) {
+	entries, err := os.ReadDir(rootPath)
+	if err != nil {
+		panic(err)
+	}
+
+	// Traverse directory tree recursively.
+	for _, entry := range entries {
+		if entry.IsDir() {
+			subDir := filepath.Join(rootPath, entry.Name())
+			traverseDir(subDir, filesizes)
+		} else {
+			info, _ := entry.Info()
+			filesizes <- info.Size()
+		}
+	}
+}
+
+func du(args ...string) []byte {
+	if len(args) != 0 {
+		// Scan the whole directory recursively and compute filesizes for each of them.
+		// Display the information to the client.
+		// fileSizes := make(chan )
+		filesizes := make(chan int64)
+		rootDir := args[0]
+		go func() {
+			traverseDir(rootDir, filesizes)
+			close(filesizes)
+		}()
+
+		// accumulate filesizes
+		var totalFiles, totalBytes int64
+		for size := range filesizes {
+			totalFiles++
+			totalBytes += size
+		}
+
+		// TODO(alx): Display in GB
+		result := fmt.Sprintf("files: %d, bytes: %.3f KB\n", totalFiles, float64(totalBytes)*(1.0/1024.0))
+		return []byte(result)
+	}
+	return []byte{}
 }
 
 func ls(args ...string) []byte {

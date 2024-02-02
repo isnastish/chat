@@ -13,9 +13,11 @@ import (
 )
 
 type Peer struct {
-	Id          string
-	Conn        net.Conn
-	Addr        net.Addr
+	Id         string
+	Conn       net.Conn
+	Addr       net.Addr
+	UniqueName string
+
 	IsConnected bool
 }
 
@@ -52,12 +54,13 @@ func (cli *Cli) getHandler(command string) (CommandHandler, bool) {
 	return nil, false
 }
 
-func NewPeer(connection net.Conn) *Peer {
+func NewPeer(connection net.Conn, name string) *Peer {
 	addr := connection.RemoteAddr()
 	return &Peer{
 		Addr:        addr,
 		Id:          GenSHA256(addr.String()),
 		Conn:        connection,
+		UniqueName:  name,
 		IsConnected: true,
 	}
 }
@@ -80,6 +83,7 @@ func NewServer() *Server {
 	s.cli.registerCommand(":rmdir", rmdir)
 	s.cli.registerCommand(":rm", rm)
 	s.cli.registerCommand(":touch", touch)
+	s.cli.registerCommand(":du", du) // disk usage
 
 	return &s
 }
@@ -88,7 +92,35 @@ func (s *Server) addConnection(conn net.Conn) *Peer {
 	log.Println("Added new connection")
 	s.Mu.Lock()
 	defer s.Mu.Unlock()
-	peer := NewPeer(conn)
+
+	// fmt.Print("Enter unique client name:")
+
+	// // NOTE(alx): This has to be done on the client side,
+	// // And the name has to be sent to the server.
+
+	// var uniqueName string
+	// // var retriesCount = 3
+	// var nameWasSelected = true
+
+	// for {
+	// 	fmt.Scanf("%s", &uniqueName)
+
+	// 	// Check in a database whether this name already exists,
+	// 	// if not prompt for login.
+	// 	for _, peer := range s.Connections {
+	// 		if uniqueName == peer.UniqueName {
+	// 			fmt.Println("Name already occupied.")
+	// 			nameWasSelected = false
+	// 			break
+	// 		}
+	// 	}
+
+	// 	if nameWasSelected {
+	// 		break
+	// 	}
+	// }
+
+	peer := NewPeer(conn, "SomeName")
 	s.Connections[peer.Id] = peer
 	return peer
 }
@@ -100,6 +132,7 @@ func (s *Server) removeConnection(connId string) {
 }
 
 func (s *Server) processConnection(conn net.Conn) {
+
 	curPeer := s.addConnection(conn) // pointer might change its address as we add more connections.
 	log.Println("Connected peer: ", curPeer.Addr.String())
 
@@ -126,7 +159,7 @@ func (s *Server) processConnection(conn net.Conn) {
 			switch {
 
 			case MatchCommand(command, ":ftp"):
-				// get file name from the host, returns only bytes for now.
+				// NOTE: get file name from the host, returns only bytes for now.
 				if len(args) == 0 {
 					conn.Write([]byte("File is not specified\n"))
 					continue
@@ -169,17 +202,11 @@ func (s *Server) processConnection(conn net.Conn) {
 }
 
 func (s *Server) Run(options *Options) {
-	var port string
-	if len(options.Ports) != 0 {
-		port = options.Ports[0]
-	} else {
-		fmt.Println("Port is not specified, using the default one: 8080")
-		port = "8080"
-	}
-
-	address := options.GetAddress(port)
+	address := options.GetAddress()
 	listener, err := net.Listen(options.Network, address)
-	CheckError(err)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	log.Println("Listening: ", address)
 
@@ -189,6 +216,10 @@ func (s *Server) Run(options *Options) {
 			fmt.Println("Connection aborted.")
 			continue
 		}
+
+		// When client joins the session (and probably session has to be implemented as well.)
+		// It should choose the name. The server should store that name in a database or just in memory,
+		// use Redis? Try different approaches, with mysql as well.
 		go s.processConnection(conn)
 	}
 }

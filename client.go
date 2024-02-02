@@ -1,6 +1,22 @@
 package main
 
-// TODO(alx): Get rid of copy function.
+/* TODO(alx): Get rid of copy function.
+[] Give client some time to retry the connection. (when making a request)
+	retriesCount := 0
+	while retriesCount <= session.retriesTotal{
+		try to establish the connection
+		response := makeRequest()
+		if response.status == "ConnectionFailed"{
+
+		} else {
+			panic(errors.New("Failed to make a request with status: ", response.status))
+		}
+
+		if retriesCount <= session.retriesTotal{
+			time.Sleep(2 * time.Second)
+		}
+	}
+*/
 
 import (
 	"fmt"
@@ -44,7 +60,7 @@ func (s *Session) send(dest net.Conn) {
 }
 
 func Run(options *Options) {
-	conn, err := net.Dial(options.Network, options.GetAddress(options.Ports[0]))
+	conn, err := net.Dial(options.Network, options.GetAddress())
 	if err != nil {
 		log.Fatal("Connection aborted", err.Error())
 	}

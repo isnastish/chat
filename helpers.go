@@ -5,9 +5,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 )
@@ -27,15 +27,15 @@ func GenSHA256(peerName string) string {
 	return strings.ToUpper(hex.EncodeToString(hash))
 }
 
+func ValidatePort(port int) {
+	if port < 1024 || port > math.MaxUint16 {
+		panic(errors.New("Invalid port range."))
+	}
+}
+
 func TrimWhitespaces(str string) string {
 	const cutset = " \n\t\r\f\a\b\v"
 	return strings.Trim(str, cutset)
-}
-
-func lsDir(args ...string) ([]byte, error) {
-	cmd := exec.Command("ls.exe", args...)
-	cmdOut, err := cmd.Output()
-	return cmdOut, err
 }
 
 // Server specific.

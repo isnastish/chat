@@ -10,7 +10,7 @@ import (
 func main() {
 	options := Options{}
 
-	flag.Var(&options.Ports, "port", "Ports to connect to")
+	flag.IntVar(&options.Port, "port", 8080, "Ports to connect to")
 	flag.StringVar(&options.Network, "network", "tcp", "Network protocol [tcp|udp]")
 	flag.StringVar(&options.Address, "address", "localhost", "Address of the server to connect to.")
 
