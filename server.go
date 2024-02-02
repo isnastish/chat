@@ -169,6 +169,9 @@ func (s *Server) processConnection(conn net.Conn) {
 }
 
 func (s *Server) Run(options *Options) {
+	cmdReg := NewCmdRegistry()
+	cmdReg.RegisterCommand(":ls", Ls)
+
 	var port string
 	if len(options.Ports) != 0 {
 		port = options.Ports[0]
@@ -189,6 +192,6 @@ func (s *Server) Run(options *Options) {
 			fmt.Println("Connection aborted.")
 			continue
 		}
-		go s.processConnection(conn)
+		go s.processConnection(conn, cmdReg)
 	}
 }
