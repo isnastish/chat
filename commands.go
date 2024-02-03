@@ -37,16 +37,16 @@ func directoryIsNotSpecified() []byte {
 	return []byte("Directory is not specified.\n\n")
 }
 
-func traverseDir(rootPath string, files chan<- FileInfo, errorStream chan<- []byte) {
+func traverseDir(rootPath string, files chan<- FileInfo) {
 	entries, err := os.ReadDir(rootPath)
 	if err != nil {
-		errorStream <- serverInternalError()
+		log.Println(err)
 	}
 
 	for _, entry := range entries {
 		if entry.IsDir() {
 			subDir := filepath.Join(rootPath, entry.Name())
-			traverseDir(subDir, files, errorStream)
+			traverseDir(subDir, files)
 		} else {
 			path, _ := os.Getwd()
 			fileFullPath := filepath.Join(path, entry.Name())
@@ -60,20 +60,25 @@ func diskUsage(args ...string) []byte {
 	if len(args) != 0 {
 		rootDir := args[0]
 		files := make(chan FileInfo)
-		errorStream := make(chan []byte, 1)
+		// errorStream := make(chan []byte, 1)
 
-		go func() {
-			traverseDir(rootDir, files, errorStream)
-			close(errorStream)
+		defer func() {
 			close(files)
+			log.Println("Channel has been closed.")
 		}()
 
-		for err := range errorStream {
-			return err
-		}
+		go func() {
+			traverseDir(rootDir, files)
+		}()
 
-		var result []string
-		var totalFiles, totalBytes int64
+		// select {
+		// case err := <- errorStream:
+		// }
+
+		var (
+			result                 []string
+			totalFiles, totalBytes int64
+		)
 
 		for file := range files {
 			info := fmt.Sprintf("%-64s\t[%.2f] KB\n", file.FullPath, float32(file.Size)*(1.0/1024.0))
@@ -85,6 +90,8 @@ func diskUsage(args ...string) []byte {
 
 		totalUsage := fmt.Sprintf("\n\nTotal files: %d, total size: [%.2f] KB\n\n", totalFiles, float32(totalBytes)*(1.0/1024.0))
 		result = append(result, totalUsage)
+
+		log.Println(result)
 
 		return []byte(strings.Join(result, ""))
 	}
@@ -123,8 +130,11 @@ func ls(args ...string) []byte {
 			return serverInternalError()
 		}
 
-		const rowEntries int = 5
-		var result []string
+		var (
+			rowEntries int = 5
+			result     []string
+		)
+
 		for index, entry := range dirEntries {
 			if index != 0 && (index%rowEntries) == 0 {
 				result = append(result, "\n")
@@ -259,4 +269,8 @@ func rm(args ...string) []byte {
 		}
 	}
 	return []byte{}
+}
+
+func history() {
+	// display commands history.
 }

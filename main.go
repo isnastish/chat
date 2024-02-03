@@ -5,13 +5,16 @@ package main
 import (
 	"flag"
 	"strings"
+
+	// Used for testing small programs.
+	"github.com/isnastish/chat/misc"
 )
 
 func main() {
 	options := Options{}
 
-	// NOTE(alx): Uncomment to generate a new certificate.
-	// genCertificateSimple()
+	var runMisc bool
+	flag.BoolVar(&runMisc, "misc", false, "Run study examples.")
 
 	flag.IntVar(&options.Port, "port", 8080, "Ports to connect to")
 	flag.StringVar(&options.Network, "network", "tcp", "Network protocol [tcp|udp]")
@@ -22,16 +25,23 @@ func main() {
 
 	flag.Parse()
 
-	if *help {
-		flag.PrintDefaults()
-		return
-	}
+	if runMisc != false {
+		misc.EntryPoint()
+	} else {
+		// NOTE(alx): Uncomment to generate a new certificate.
+		// genCertificateSimple()
 
-	var linstance = strings.ToLower(*instance)
-	if linstance == "server" {
-		server = NewServer()
-		server.Run(&options)
-	} else if linstance == "client" {
-		Run(&options)
+		if *help {
+			flag.PrintDefaults()
+			return
+		}
+
+		var linstance = strings.ToLower(*instance)
+		if linstance == "server" {
+			server = NewServer()
+			server.Run(&options)
+		} else if linstance == "client" {
+			Run(&options)
+		}
 	}
 }

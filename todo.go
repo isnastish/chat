@@ -13,6 +13,8 @@ TODO:
 
 [ ] Implement :tree command (our own using ascii).
 
+[ ] Redesign client.
+
 [x] Improve :du command.
 
 [ ] Polish :rm command (maybe redesign).
@@ -47,7 +49,6 @@ TODO:
 	beingCommandCapture(...)
 	// All the commands executed in between will be captured.
 	// :ls
-	// :
 	endCommandCapture(...)
 
 	All the commands should be written into database using client's credentials and session's id.

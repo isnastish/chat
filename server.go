@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"crypto/tls"
 	_ "crypto/tls"
 	"fmt"
 	"io"
@@ -14,9 +15,12 @@ import (
 )
 
 type Peer struct {
-	Id         string
-	Conn       net.Conn
-	Addr       net.Addr
+	Id   string
+	Conn net.Conn
+	Addr net.Addr
+
+	// TODO(alx): Use redis database to store the data about connected peers.
+	// And their sessions.
 	UniqueName string
 
 	IsConnected bool
@@ -37,13 +41,39 @@ type Cli struct {
 type Server struct {
 	Connections map[string]*Peer
 	cli         *Cli // maybe not a pointer, didn't have enough time to think about it.
-	Mu          sync.Mutex
+	listener    net.Listener
+	tlsConfig   *tls.Config
+
+	workerPool *WorkerPool
+
+	Mu sync.Mutex
 }
 
 var server *Server
 
+func NewCli() *Cli {
+	cli := &Cli{commandRegistry: make(map[string]CommandHandler)}
+	cli.registerCommands()
+
+	return cli
+}
+
 func (cli *Cli) registerCommand(command string, handler CommandHandler) {
 	cli.commandRegistry[command] = handler
+}
+
+func (cli *Cli) registerCommands() {
+	cli.registerCommand(":ls", ls)
+	cli.registerCommand(":cd", cd)
+	cli.registerCommand(":cwd", cwd)
+	cli.registerCommand(":cat", cat)
+	cli.registerCommand(":mkdir", mkdir)
+	cli.registerCommand(":rmdir", rmdir)
+	cli.registerCommand(":rm", rm)
+	cli.registerCommand(":touch", touch)
+	cli.registerCommand(":du", diskUsage)
+	cli.registerCommand(":pwd", pwd)
+	cli.registerCommand(":mv", mv)
 }
 
 func (cli *Cli) getHandler(command string) (CommandHandler, bool) {
@@ -69,24 +99,9 @@ func NewPeer(connection net.Conn, name string) *Peer {
 func NewServer() *Server {
 	s := Server{
 		Connections: make(map[string]*Peer),
-		cli: &Cli{
-			commandRegistry: make(map[string]CommandHandler),
-		},
+		cli:         NewCli(),
+		workerPool:  NewWorkerPool(2),
 	}
-
-	// Register all the commans that can be executed on a server.
-	// We can add custom commands as well, but a handler would be different.
-	s.cli.registerCommand(":ls", ls)
-	s.cli.registerCommand(":cd", cd)
-	s.cli.registerCommand(":cwd", cwd)
-	s.cli.registerCommand(":cat", cat)
-	s.cli.registerCommand(":mkdir", mkdir)
-	s.cli.registerCommand(":rmdir", rmdir)
-	s.cli.registerCommand(":rm", rm)
-	s.cli.registerCommand(":touch", touch)
-	s.cli.registerCommand(":du", diskUsage)
-	s.cli.registerCommand(":pwd", pwd)
-	s.cli.registerCommand(":mv", mv)
 
 	return &s
 }
@@ -96,34 +111,9 @@ func (s *Server) addConnection(conn net.Conn) *Peer {
 	s.Mu.Lock()
 	defer s.Mu.Unlock()
 
-	// fmt.Print("Enter unique client name:")
+	// uniquePeerName := s.promptPeerName()
 
-	// // NOTE(alx): This has to be done on the client side,
-	// // And the name has to be sent to the server.
-
-	// var uniqueName string
-	// // var retriesCount = 3
-	// var nameWasSelected = true
-
-	// for {
-	// 	fmt.Scanf("%s", &uniqueName)
-
-	// 	// Check in a database whether this name already exists,
-	// 	// if not prompt for login.
-	// 	for _, peer := range s.Connections {
-	// 		if uniqueName == peer.UniqueName {
-	// 			fmt.Println("Name already occupied.")
-	// 			nameWasSelected = false
-	// 			break
-	// 		}
-	// 	}
-
-	// 	if nameWasSelected {
-	// 		break
-	// 	}
-	// }
-
-	peer := NewPeer(conn, "SomeName")
+	peer := NewPeer(conn, "SomePeer")
 	s.Connections[peer.Id] = peer
 	return peer
 }
@@ -135,7 +125,6 @@ func (s *Server) removeConnection(connId string) {
 }
 
 func (s *Server) processConnection(conn net.Conn) {
-
 	curPeer := s.addConnection(conn) // pointer might change its address as we add more connections.
 	log.Println("Connected peer: ", curPeer.Addr.String())
 
@@ -156,10 +145,23 @@ func (s *Server) processConnection(conn net.Conn) {
 		// NOTE: This is not a final version, because if we want to handle edge cases like this:
 		// mkdir <dirname> & cd <dirname> we would have to parse the whole string and break it down into tokens.
 		if handler, exist := s.cli.getHandler(command); exist {
-			log.Println("Invoking :ls command")
+			log.Println("Invoking ", command)
 			conn.Write(handler(args...))
 		} else {
 			switch {
+
+			// case MatchCommand(command, "JOIN"):
+			// 	if len(args) == 0 {
+			// 		conn.Write([]byte("JOIN Name is not specified.\n\n"))
+			// 		return
+			// 	}
+			// 	for _, peer := range s.Connections {
+			// 		if args[0] == peer.UniqueName {
+			// 			conn.Write([]byte(":joined Name is already occupied.\n\n"))
+			// 			return
+			// 		}
+			// 	}
+			// 	// Add the connection here otherwise.
 
 			case MatchCommand(command, ":ftp"):
 				// NOTE: get file name from the host, returns only bytes for now.
@@ -175,6 +177,16 @@ func (s *Server) processConnection(conn net.Conn) {
 					defer f.Close()
 					io.Copy(conn, f)
 				}
+
+				// var (
+				// 	w               = NewWorker()
+				// 	offset    int64 = 0
+				// 	chunkSize int64 = 256
+				// )
+
+				// w.ReadChunk(f, offset, chunkSize)
+
+				// log.Printf("Chunk: %s\n", w.data)
 
 			case MatchCommand(command, ":close"):
 				// close the connection

@@ -4,7 +4,7 @@ package main
 // NOTE(alx): Client can be executed in one docker container and the server in another.
 
 import (
-	"os/exec"
+	// "os/exec"
 	"testing"
 )
 
@@ -21,12 +21,12 @@ func TestServerCommands(t *testing.T) {
 	// Send commands over the channel.
 	// dirName, err := os.MkdirTemp("", "tmp_test")
 	// assert.Equal(t, err, nil)
-	// defer os.RemoveAll(dirName)
+	// // defer os.RemoveAll(dirName)
 
-	go runTestingServer()
+	// go runTestingServer()
 
-	// move to that directory.
-	// os.Chdir(dirName)
+	// // move to that directory.
+	// // os.Chdir(dirName)
 
-	exec.Command("go", "build")
+	// exec.Command("go", "build")
 }
