@@ -1,4 +1,4 @@
 build/
 misc/
-generated-cert.pem
-generated-key.pem
+./generated-cert.pem
+./generated-key.pem
