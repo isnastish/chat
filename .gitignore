@@ -1,4 +1,3 @@
 build/
 misc/
-./generated-cert.pem
-./generated-key.pem
+*.pem
