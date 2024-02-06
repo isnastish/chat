@@ -6,53 +6,190 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 )
+
+type FileInfo struct {
+	FullPath string
+	Size     int64
+}
 
 func MatchCommand(command, match string) bool {
 	return bool(command == match)
 }
 
-func ls(args ...string) []byte {
-	cmd := exec.Command("ls", args...)
-	cmdOut, err := cmd.Output()
+// temporary
+func serverInternalError() []byte {
+	return []byte("Server internal error: 500\n\n")
+}
+
+// temporary
+func appendLF(src []byte) []byte {
+	src = append(src, 0x0A)
+	src = append(src, 0x0A)
+
+	return src
+}
+
+// temporary
+func directoryIsNotSpecified() []byte {
+	return []byte("Directory is not specified.\n\n")
+}
+
+func traverseDir(rootPath string, files chan<- FileInfo) {
+	entries, err := os.ReadDir(rootPath)
 	if err != nil {
-		return []byte("ls command failed\n")
+		log.Println(err)
 	}
-	return cmdOut
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			subDir := filepath.Join(rootPath, entry.Name())
+			traverseDir(subDir, files)
+		} else {
+			path, _ := os.Getwd()
+			fileFullPath := filepath.Join(path, entry.Name())
+			info, _ := entry.Info()
+			files <- FileInfo{FullPath: fileFullPath, Size: info.Size()}
+		}
+	}
+}
+
+func diskUsage(args ...string) []byte {
+	if len(args) != 0 {
+		rootDir := args[0]
+		files := make(chan FileInfo)
+		// errorStream := make(chan []byte, 1)
+
+		defer func() {
+			close(files)
+			log.Println("Channel has been closed.")
+		}()
+
+		go func() {
+			traverseDir(rootDir, files)
+		}()
+
+		// select {
+		// case err := <- errorStream:
+		// }
+
+		var (
+			result                 []string
+			totalFiles, totalBytes int64
+		)
+
+		for file := range files {
+			info := fmt.Sprintf("%-64s\t[%.2f] KB\n", file.FullPath, float32(file.Size)*(1.0/1024.0))
+			result = append(result, info)
+
+			totalFiles++
+			totalBytes += file.Size
+		}
+
+		totalUsage := fmt.Sprintf("\n\nTotal files: %d, total size: [%.2f] KB\n\n", totalFiles, float32(totalBytes)*(1.0/1024.0))
+		result = append(result, totalUsage)
+
+		log.Println(result)
+
+		return []byte(strings.Join(result, ""))
+	}
+	return directoryIsNotSpecified()
+}
+
+func mv(args ...string) []byte {
+	cmd := exec.Command("mv", args...)
+	out, err := cmd.Output()
+	if err != nil {
+		// Failed to run the command.
+		// Log on the server side.
+		return serverInternalError()
+	}
+
+	out = appendLF(out)
+	return out
+}
+
+func pwd(args ...string) []byte {
+	cwd, err := os.Getwd()
+	if err != nil {
+		// TODO(alx): Log on the server side,
+		// capture the command, maybe not here, but in the main processing loop.
+		return serverInternalError()
+	}
+	return []byte(cwd + "\n\n")
+}
+
+func ls(args ...string) []byte {
+	if len(args) == 0 {
+		dirEntries, err := os.ReadDir(".")
+		if err != nil {
+			// TODO(alx): Log on the server side why the command failed.
+			// and capture the command.
+			return serverInternalError()
+		}
+
+		var (
+			rowEntries int = 5
+			result     []string
+		)
+
+		for index, entry := range dirEntries {
+			if index != 0 && (index%rowEntries) == 0 {
+				result = append(result, "\n")
+			}
+			name := fmt.Sprintf("%-20s", entry.Name())
+			result = append(result, name)
+		}
+		result = append(result, "\n\n")
+
+		return []byte(strings.Join(result, ""))
+	} else {
+		// This is more advance.
+		// Just capture the output from executing ls in a subprocess.
+		// Implement your own?
+		cmd := exec.Command("ls", args...)
+		out, err := cmd.Output()
+		if err != nil {
+			return serverInternalError()
+		}
+		out = appendLF(out)
+		return out
+	}
 }
 
 func cd(args ...string) []byte {
 	if len(args) != 0 {
 		err := os.Chdir(args[0])
 		if err != nil {
-			log.Println(":cd command failed with error: ", err.Error())
-			return []byte{}
+			// Log, capture the command.
+			return serverInternalError()
 		}
 		dir, _ := os.Getwd()
-		return []byte(dir)
+		return []byte(dir + "\n\n")
 	}
-	return []byte{}
+	return directoryIsNotSpecified()
 }
 
 func cwd(args ...string) []byte {
 	dir, err := os.Getwd()
 	if err != nil {
-		fmt.Println(":cwd command failed with error: ", err.Error())
-		return []byte{}
+		// Log, capture the command.
+		return serverInternalError()
 	}
-	return []byte(dir)
+	return []byte(dir + "\n\n")
 }
 
 func mkdir(args ...string) []byte {
 	if len(args) != 0 {
 		err := os.Mkdir(args[0], 0755)
 		if err != nil {
-			log.Println(":mkdir command failed with error: ", err.Error())
-			return []byte("Internal server error\n")
+			return serverInternalError()
 		}
 		return cwd()
 	}
-	return []byte("Directory is not specified\n")
+	return directoryIsNotSpecified()
 }
 
 func rmdir(args ...string) []byte {
@@ -64,7 +201,7 @@ func rmdir(args ...string) []byte {
 		}
 		return cwd()
 	}
-	return []byte("Directory is not specified\n")
+	return directoryIsNotSpecified()
 }
 
 func tree(args ...string) []byte {
@@ -75,26 +212,25 @@ func touch(args ...string) []byte {
 	if len(args) != 0 {
 		f, err := os.Create(args[0])
 		if err != nil {
-			log.Println(":touch command failed with error: ", err.Error())
-			// Return internal server error?
-			return []byte{}
+			// Log, capture the command.
+			return serverInternalError()
 		}
 		defer f.Close()
 	}
-	return []byte("file is not specified\n")
+	return []byte("File is not specified.\n\n")
 }
 
 func cat(args ...string) []byte {
 	if len(args) != 0 {
 		contents, err := os.ReadFile(args[0])
 		if err != nil {
-			log.Println(":cat command failed with error: ", err.Error())
-			return []byte{}
+			// Log, capture the command.
+			return serverInternalError()
 		}
-		contents = append(contents, '\n')
+		contents = appendLF(contents)
 		return contents
 	}
-	return []byte("file doesn't exist\n")
+	return []byte("File doesn't exist.\n\n")
 }
 
 // Very small subset of what rm command actually can support.
@@ -133,4 +269,8 @@ func rm(args ...string) []byte {
 		}
 	}
 	return []byte{}
+}
+
+func history() {
+	// display commands history.
 }

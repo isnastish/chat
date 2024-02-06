@@ -1,25 +1,14 @@
 package main
 
-import "strings"
+import "strconv"
 
-type ArrayFlags []string
-
-// NOTE(alx): This should only contain the data that we want to keep.
 type Options struct {
-	Ports   ArrayFlags
+	Port    int
 	Address string
 	Network string
 }
 
-func (flags *ArrayFlags) Set(value string) error {
-	*flags = append(*flags, value)
-	return nil
-}
-
-func (flags *ArrayFlags) String() string {
-	return strings.Join(*flags, " ")
-}
-
-func (o *Options) GetAddress(port string) string {
-	return o.Address + ":" + port
+func (o *Options) GetAddress() string {
+	ValidatePort(o.Port)
+	return o.Address + ":" + strconv.Itoa(o.Port)
 }

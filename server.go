@@ -2,6 +2,8 @@ package main
 
 import (
 	"bufio"
+	"crypto/tls"
+	_ "crypto/tls"
 	"fmt"
 	"io"
 	"log"
@@ -13,9 +15,14 @@ import (
 )
 
 type Peer struct {
-	Id          string
-	Conn        net.Conn
-	Addr        net.Addr
+	Id   string
+	Conn net.Conn
+	Addr net.Addr
+
+	// TODO(alx): Use redis database to store the data about connected peers.
+	// And their sessions.
+	UniqueName string
+
 	IsConnected bool
 }
 
@@ -34,13 +41,39 @@ type Cli struct {
 type Server struct {
 	Connections map[string]*Peer
 	cli         *Cli // maybe not a pointer, didn't have enough time to think about it.
-	Mu          sync.Mutex
+	listener    net.Listener
+	tlsConfig   *tls.Config
+
+	workerPool *WorkerPool
+
+	Mu sync.Mutex
 }
 
 var server *Server
 
+func NewCli() *Cli {
+	cli := &Cli{commandRegistry: make(map[string]CommandHandler)}
+	cli.registerCommands()
+
+	return cli
+}
+
 func (cli *Cli) registerCommand(command string, handler CommandHandler) {
 	cli.commandRegistry[command] = handler
+}
+
+func (cli *Cli) registerCommands() {
+	cli.registerCommand(":ls", ls)
+	cli.registerCommand(":cd", cd)
+	cli.registerCommand(":cwd", cwd)
+	cli.registerCommand(":cat", cat)
+	cli.registerCommand(":mkdir", mkdir)
+	cli.registerCommand(":rmdir", rmdir)
+	cli.registerCommand(":rm", rm)
+	cli.registerCommand(":touch", touch)
+	cli.registerCommand(":du", diskUsage)
+	cli.registerCommand(":pwd", pwd)
+	cli.registerCommand(":mv", mv)
 }
 
 func (cli *Cli) getHandler(command string) (CommandHandler, bool) {
@@ -52,12 +85,13 @@ func (cli *Cli) getHandler(command string) (CommandHandler, bool) {
 	return nil, false
 }
 
-func NewPeer(connection net.Conn) *Peer {
+func NewPeer(connection net.Conn, name string) *Peer {
 	addr := connection.RemoteAddr()
 	return &Peer{
 		Addr:        addr,
 		Id:          GenSHA256(addr.String()),
 		Conn:        connection,
+		UniqueName:  name,
 		IsConnected: true,
 	}
 }
@@ -65,21 +99,9 @@ func NewPeer(connection net.Conn) *Peer {
 func NewServer() *Server {
 	s := Server{
 		Connections: make(map[string]*Peer),
-		cli: &Cli{
-			commandRegistry: make(map[string]CommandHandler),
-		},
+		cli:         NewCli(),
+		workerPool:  NewWorkerPool(2),
 	}
-
-	// Register all the commans that can be executed on a server.
-	// We can add custom commands as well, but a handler would be different.
-	s.cli.registerCommand(":ls", ls)
-	s.cli.registerCommand(":cd", cd)
-	s.cli.registerCommand(":cwd", cwd)
-	s.cli.registerCommand(":cat", cat)
-	s.cli.registerCommand(":mkdir", mkdir)
-	s.cli.registerCommand(":rmdir", rmdir)
-	s.cli.registerCommand(":rm", rm)
-	s.cli.registerCommand(":touch", touch)
 
 	return &s
 }
@@ -88,7 +110,10 @@ func (s *Server) addConnection(conn net.Conn) *Peer {
 	log.Println("Added new connection")
 	s.Mu.Lock()
 	defer s.Mu.Unlock()
-	peer := NewPeer(conn)
+
+	// uniquePeerName := s.promptPeerName()
+
+	peer := NewPeer(conn, "SomePeer")
 	s.Connections[peer.Id] = peer
 	return peer
 }
@@ -120,13 +145,26 @@ func (s *Server) processConnection(conn net.Conn) {
 		// NOTE: This is not a final version, because if we want to handle edge cases like this:
 		// mkdir <dirname> & cd <dirname> we would have to parse the whole string and break it down into tokens.
 		if handler, exist := s.cli.getHandler(command); exist {
-			log.Println("Invoking :ls command")
+			log.Println("Invoking ", command)
 			conn.Write(handler(args...))
 		} else {
 			switch {
 
+			// case MatchCommand(command, "JOIN"):
+			// 	if len(args) == 0 {
+			// 		conn.Write([]byte("JOIN Name is not specified.\n\n"))
+			// 		return
+			// 	}
+			// 	for _, peer := range s.Connections {
+			// 		if args[0] == peer.UniqueName {
+			// 			conn.Write([]byte(":joined Name is already occupied.\n\n"))
+			// 			return
+			// 		}
+			// 	}
+			// 	// Add the connection here otherwise.
+
 			case MatchCommand(command, ":ftp"):
-				// get file name from the host, returns only bytes for now.
+				// NOTE: get file name from the host, returns only bytes for now.
 				if len(args) == 0 {
 					conn.Write([]byte("File is not specified\n"))
 					continue
@@ -139,6 +177,16 @@ func (s *Server) processConnection(conn net.Conn) {
 					defer f.Close()
 					io.Copy(conn, f)
 				}
+
+				// var (
+				// 	w               = NewWorker()
+				// 	offset    int64 = 0
+				// 	chunkSize int64 = 256
+				// )
+
+				// w.ReadChunk(f, offset, chunkSize)
+
+				// log.Printf("Chunk: %s\n", w.data)
 
 			case MatchCommand(command, ":close"):
 				// close the connection
@@ -169,17 +217,24 @@ func (s *Server) processConnection(conn net.Conn) {
 }
 
 func (s *Server) Run(options *Options) {
-	var port string
-	if len(options.Ports) != 0 {
-		port = options.Ports[0]
-	} else {
-		fmt.Println("Port is not specified, using the default one: 8080")
-		port = "8080"
-	}
+	address := options.GetAddress()
 
-	address := options.GetAddress(port)
+	// cert, err := tls.LoadX509KeyPair("generated-cert.pem", "generated-key.pem")
+	// if err != nil {
+	// 	log.Fatal(err)
+	// }
+
+	// // should be part of a server.
+	// config := &tls.Config{
+	// 	Certificates: []tls.Certificate{cert},
+	// }
+
+	// listener, err := tls.Listen(options.Network, address, config)
 	listener, err := net.Listen(options.Network, address)
-	CheckError(err)
+
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	log.Println("Listening: ", address)
 
@@ -189,6 +244,10 @@ func (s *Server) Run(options *Options) {
 			fmt.Println("Connection aborted.")
 			continue
 		}
+
+		// When client joins the session (and probably session has to be implemented as well.)
+		// It should choose the name. The server should store that name in a database or just in memory,
+		// use Redis? Try different approaches, with mysql as well.
 		go s.processConnection(conn)
 	}
 }
